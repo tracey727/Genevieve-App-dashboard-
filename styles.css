@@ -1,0 +1,247 @@
+:root {
+  color-scheme: light;
+  --gold: #c9a227;
+  --ink: #111111;
+  --pink: #f7dbe5;
+  --pink-soft: #fff7fa;
+  --white: #ffffff;
+  --green: #177a45;
+  --green-soft: #e9f8ef;
+  --red: #b42318;
+  --red-soft: #fff0ee;
+  --grey: #6b7280;
+  --line: #eadde2;
+  --shadow: 0 14px 40px rgba(17, 17, 17, 0.10);
+}
+
+* { box-sizing: border-box; }
+
+html, body { min-height: 100%; }
+
+body {
+  margin: 0;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top right, rgba(201, 162, 39, 0.15), transparent 34%),
+    linear-gradient(180deg, var(--pink-soft), var(--pink));
+}
+
+button { font: inherit; }
+
+.app-shell {
+  width: min(100%, 560px);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: max(24px, env(safe-area-inset-top)) 18px max(28px, env(safe-area-inset-bottom));
+}
+
+.app-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 8px 2px 20px;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: var(--gold);
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(2rem, 8vw, 3rem);
+  line-height: 0.98;
+}
+
+.subtitle {
+  margin: 9px 0 0;
+  color: var(--grey);
+  font-size: 0.94rem;
+}
+
+.mode-badge {
+  flex: 0 0 auto;
+  border: 1px solid rgba(201, 162, 39, 0.55);
+  border-radius: 999px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.75);
+  color: #6b5300;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.summary-panel,
+.service-card,
+.control-panel {
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+}
+
+.summary-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  border-radius: 22px;
+  padding: 18px;
+}
+
+.summary-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--grey);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+#overallStatus {
+  font-size: 1.35rem;
+  letter-spacing: 0.04em;
+}
+
+.service-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.service-card {
+  border-radius: 22px;
+  padding: 16px;
+  transition: transform 120ms ease, border-color 120ms ease;
+}
+
+.service-card.online {
+  border-color: rgba(23, 122, 69, 0.35);
+}
+
+.service-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-dot {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  border: 4px solid #f5c7c2;
+  border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 0 5px var(--red-soft);
+}
+
+.service-card.online .status-dot {
+  border-color: #bde7cc;
+  background: var(--green);
+  box-shadow: 0 0 0 5px var(--green-soft);
+}
+
+h2 {
+  margin: 0;
+  font-size: 1.07rem;
+}
+
+.service-heading p {
+  margin: 4px 0 0;
+  color: var(--grey);
+  font-size: 0.82rem;
+}
+
+.status-button {
+  width: 100%;
+  margin-top: 14px;
+  border: 0;
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: var(--red-soft);
+  color: var(--red);
+  cursor: pointer;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.service-card.online .status-button {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.status-button:active { transform: scale(0.99); }
+
+.status-text {
+  display: block;
+  font-size: 1rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.tap-hint {
+  display: block;
+  margin-top: 2px;
+  color: currentColor;
+  font-size: 0.72rem;
+  opacity: 0.72;
+}
+
+.control-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 14px;
+  border-radius: 22px;
+  padding: 12px;
+}
+
+.primary-button,
+.danger-button,
+.secondary-button {
+  min-height: 46px;
+  border-radius: 14px;
+  padding: 10px 14px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.primary-button {
+  border: 1px solid var(--green);
+  background: var(--green);
+  color: var(--white);
+}
+
+.danger-button {
+  border: 1px solid var(--red);
+  background: var(--white);
+  color: var(--red);
+}
+
+.secondary-button {
+  border: 1px solid var(--ink);
+  background: var(--white);
+  color: var(--ink);
+}
+
+footer {
+  padding: 18px 5px 0;
+  color: #595959;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  text-align: center;
+}
+
+footer p { margin: 4px 0; }
+
+@media (max-width: 390px) {
+  .app-header { align-items: flex-start; }
+  .mode-badge { padding: 7px 8px; font-size: 0.61rem; }
+  .control-panel { grid-template-columns: 1fr; }
+}

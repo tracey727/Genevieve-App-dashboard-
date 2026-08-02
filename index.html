@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#111111">
+  <meta name="description" content="Genevieve Ecosystem mobile test dashboard">
+  <title>Genevieve Ecosystem Test</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">GENEVIEVE</p>
+        <h1>Ecosystem Test</h1>
+        <p class="subtitle">Mobile command status dashboard</p>
+      </div>
+      <span id="modeBadge" class="mode-badge">MANUAL TEST</span>
+    </header>
+
+    <section class="summary-panel" aria-label="System summary">
+      <div>
+        <span class="summary-label">Overall status</span>
+        <strong id="overallStatus">OFFLINE</strong>
+      </div>
+      <button id="refreshButton" class="secondary-button" type="button">Refresh</button>
+    </section>
+
+    <section id="serviceGrid" class="service-grid" aria-label="Service status">
+      <article class="service-card" data-service="main">
+        <div class="service-heading">
+          <span class="status-dot" aria-hidden="true"></span>
+          <div>
+            <h2>Main Command Centre</h2>
+            <p>Core control service</p>
+          </div>
+        </div>
+        <button class="status-button" type="button" aria-label="Change Main Command Centre status">
+          <span class="status-text">OFFLINE</span>
+          <span class="tap-hint">Tap to change</span>
+        </button>
+      </article>
+
+      <article class="service-card" data-service="health">
+        <div class="service-heading">
+          <span class="status-dot" aria-hidden="true"></span>
+          <div>
+            <h2>Health</h2>
+            <p>Health ecosystem service</p>
+          </div>
+        </div>
+        <button class="status-button" type="button" aria-label="Change Health status">
+          <span class="status-text">OFFLINE</span>
+          <span class="tap-hint">Tap to change</span>
+        </button>
+      </article>
+
+      <article class="service-card" data-service="animal">
+        <div class="service-heading">
+          <span class="status-dot" aria-hidden="true"></span>
+          <div>
+            <h2>Animal</h2>
+            <p>Animal ecosystem service</p>
+          </div>
+        </div>
+        <button class="status-button" type="button" aria-label="Change Animal status">
+          <span class="status-text">OFFLINE</span>
+          <span class="tap-hint">Tap to change</span>
+        </button>
+      </article>
+    </section>
+
+    <section class="control-panel" aria-label="Quick controls">
+      <button id="allOnlineButton" class="primary-button" type="button">Set all online</button>
+      <button id="allOfflineButton" class="danger-button" type="button">Set all offline</button>
+    </section>
+
+    <footer>
+      <p>Last updated: <span id="lastUpdated">Not checked</span></p>
+      <p id="connectionNote">Manual test mode. Status choices are saved on this device.</p>
+    </footer>
+  </main>
+
+  <script src="/config.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

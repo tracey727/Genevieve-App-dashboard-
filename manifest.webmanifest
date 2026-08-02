@@ -1,0 +1,10 @@
+{
+  "name": "Genevieve Ecosystem Test",
+  "short_name": "Genevieve Test",
+  "description": "Mobile command status dashboard for the Genevieve ecosystem.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fff7fa",
+  "theme_color": "#111111",
+  "orientation": "portrait"
+}
