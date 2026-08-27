@@ -1,43 +1,52 @@
-name: V10.3 Deployment Infrastructure Gate
+name: V10.3 Infrastructure Audit
 
 on:
   push:
     branches:
       - v10.3-deployment-infrastructure
+    paths:
+      - '.gitignore'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'wrangler.jsonc'
+      - 'src/worker.js'
+      - 'scripts/**'
+      - '.github/workflows/v103-deployment-infrastructure.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: v103-deployment-infrastructure
+  group: v103-infrastructure-audit-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  lock-test-audit:
+  audit:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       SOURCE_SHA: 2b6a604bc92bef14dd8fcb5b8e90dbac883676e0
 
     steps:
-      - name: Checkout infrastructure branch
+      - name: Checkout exact audit commit
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Require exact verified V10.3 ancestry
+      - name: Require isolated V10.3 branch
         shell: bash
         run: |
           set -euo pipefail
+          test "${GITHUB_REF_NAME}" = "v10.3-deployment-infrastructure"
           git merge-base --is-ancestor "$SOURCE_SHA" HEAD
 
-      - name: Reject any application or sealed-source modifications
+      - name: Reject application or sealed-source modifications
         shell: bash
         run: |
           set -euo pipefail
           git diff --name-only "$SOURCE_SHA"...HEAD | tee /tmp/v103-infra-files.txt
-          unexpected="$(grep -Ev '^(\.gitignore|package\.json|package-lock\.json|wrangler\.jsonc|src/worker\.js|scripts/prepare-v103\.mjs|scripts/verify-v103\.mjs|\.github/workflows/v103-deployment-infrastructure\.yml)$' /tmp/v103-infra-files.txt || true)"
+          unexpected="$(grep -Ev '^(\.gitignore|package\.json|package-lock\.json|wrangler\.jsonc|src/worker\.js|scripts/prepare-v103\.mjs|scripts/verify-v103\.mjs|\.github/workflows/v103-deployment-infrastructure\.yml|\.github/workflows/verify-v103-sealed-portal\.yml|\.github/workflows/deploy-v103-cloudflare-preview\.yml)$' /tmp/v103-infra-files.txt || true)"
           if [ -n "$unexpected" ]; then
             echo 'Unexpected non-infrastructure changes detected:' >&2
             echo "$unexpected" >&2
@@ -45,52 +54,55 @@ jobs:
           fi
           git diff --quiet "$SOURCE_SHA" HEAD -- verification/v10.3 README-FIRST.txt app.js config.js index.html manifest.webmanifest service-worker.js styles.css vercel.json
 
+      - name: Require committed dependency lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f package-lock.json
+          node -e "const l=require('./package-lock.json'); if(l.packages['node_modules/wrangler'].version!=='4.125.0') process.exit(1); console.log('Locked wrangler',l.packages['node_modules/wrangler'].version)"
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: package-lock.json
-        continue-on-error: true
-
-      - name: Generate dependency lockfile when absent
-        id: lock
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ ! -f package-lock.json ]; then
-            npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-            echo 'created=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'created=false' >> "$GITHUB_OUTPUT"
-          fi
-          test -f package-lock.json
-          node -e "const l=require('./package-lock.json'); if(l.packages['node_modules/wrangler'].version!=='4.125.0') process.exit(1); console.log('Locked wrangler',l.packages['node_modules/wrangler'].version)"
-
-      - name: Commit generated lockfile to infrastructure branch
-        if: steps.lock.outputs.created == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add package-lock.json
-          git commit -m 'Lock V10.3 deployment dependencies'
-          git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Install exactly from lockfile
         shell: bash
         run: npm ci --no-audit --no-fund
 
-      - name: Run V10.3 deployment integrity and Wrangler dry-run tests
+      - name: Run integrity and Wrangler dry-run audit
         shell: bash
         run: npm test
 
-      - name: Re-audit changed paths after tests
+      - name: Prove push workflows cannot create Cloudflare versions
         shell: bash
         run: |
           set -euo pipefail
-          unexpected="$(git diff --name-only "$SOURCE_SHA"...HEAD | grep -Ev '^(\.gitignore|package\.json|package-lock\.json|wrangler\.jsonc|src/worker\.js|scripts/prepare-v103\.mjs|scripts/verify-v103\.mjs|\.github/workflows/v103-deployment-infrastructure\.yml)$' || true)"
-          test -z "$unexpected"
+          for f in .github/workflows/v103-deployment-infrastructure.yml .github/workflows/verify-v103-sealed-portal.yml; do
+            test -f "$f"
+            if grep -Eiq 'wrangler[[:space:]]+(deploy|versions[[:space:]]+upload)|npm[[:space:]]+run[[:space:]]+(deploy|deploy:preview)' "$f"; then
+              echo "Deployment command found in push-triggered workflow: $f" >&2
+              exit 1
+            fi
+          done
+
+      - name: Prove deployment workflow is manual-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy=.github/workflows/deploy-v103-cloudflare-preview.yml
+          test -f "$deploy"
+          grep -q '^  workflow_dispatch:' "$deploy"
+          if grep -Eq '^  (push|pull_request|schedule|workflow_run):' "$deploy"; then
+            echo 'Automatic trigger found in deployment workflow' >&2
+            exit 1
+          fi
+
+      - name: Re-audit working tree
+        shell: bash
+        run: |
+          set -euo pipefail
           test "$(git status --porcelain --untracked-files=no | wc -l)" -eq 0
-          echo 'V10.3 deployment infrastructure gate: GREEN'
+          echo 'V10.3 infrastructure audit: GREEN'
