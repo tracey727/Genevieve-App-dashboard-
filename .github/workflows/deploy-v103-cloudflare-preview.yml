@@ -1,0 +1,92 @@
+name: Deploy V10.3 Cloudflare Preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type DEPLOY-V10.3-PREVIEW to authorize one Cloudflare preview version'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v103-cloudflare-preview-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy-preview:
+    if: github.ref == 'refs/heads/v10.3-deployment-infrastructure' && inputs.confirmation == 'DEPLOY-V10.3-PREVIEW'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: v10.3-isolated-preview
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SOURCE_SHA: 2b6a604bc92bef14dd8fcb5b8e90dbac883676e0
+
+    steps:
+      - name: Checkout exact requested commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require isolated V10.3 branch and ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF_NAME}" = "v10.3-deployment-infrastructure"
+          test "${{ inputs.confirmation }}" = "DEPLOY-V10.3-PREVIEW"
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+
+      - name: Reject application or sealed-source modifications
+        shell: bash
+        run: |
+          set -euo pipefail
+          unexpected="$(git diff --name-only "$SOURCE_SHA"...HEAD | grep -Ev '^(\.gitignore|package\.json|package-lock\.json|wrangler\.jsonc|src/worker\.js|scripts/prepare-v103\.mjs|scripts/verify-v103\.mjs|\.github/workflows/v103-deployment-infrastructure\.yml|\.github/workflows/verify-v103-sealed-portal\.yml|\.github/workflows/deploy-v103-cloudflare-preview\.yml)$' || true)"
+          if [ -n "$unexpected" ]; then
+            echo 'Unexpected non-infrastructure changes detected:' >&2
+            echo "$unexpected" >&2
+            exit 1
+          fi
+          git diff --quiet "$SOURCE_SHA" HEAD -- verification/v10.3 README-FIRST.txt app.js config.js index.html manifest.webmanifest service-worker.js styles.css vercel.json
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install exactly from committed lockfile
+        shell: bash
+        run: npm ci --no-audit --no-fund
+
+      - name: Re-run V10.3 integrity and Wrangler dry-run gate
+        shell: bash
+        run: npm test
+
+      - name: Create exactly one isolated Cloudflare preview version
+        shell: bash
+        run: npm run deploy:preview
+
+      - name: Record deliberate deployment evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "workflow=${GITHUB_WORKFLOW}"
+            echo "run_id=${GITHUB_RUN_ID}"
+            echo "commit=${GITHUB_SHA}"
+            echo "branch=${GITHUB_REF_NAME}"
+            echo "authorization=manual-workflow-dispatch"
+            echo "preview_alias=v103-infra"
+          } | tee /tmp/V103_DEPLOYMENT_EVIDENCE.txt
+
+      - name: Upload deployment evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: v103-cloudflare-preview-deployment-evidence
+          path: /tmp/V103_DEPLOYMENT_EVIDENCE.txt
+          if-no-files-found: error
