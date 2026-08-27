@@ -1,0 +1,194 @@
+name: V10.3 Cloudflare Isolated Preview Gate
+
+on:
+  push:
+    branches:
+      - cloudflare-v10-3-verification
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: genevieve-v10-3-cloudflare-preview-gate
+  cancel-in-progress: false
+
+jobs:
+  verify-and-preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_ACCOUNT_ID: 96b9de0080a58068aa4a0b57cd8a53d9
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      EXPECTED_ARCHIVE_SHA256: 79ddcfc202355783a3f45fd0e4871a8c2aeeeca287d4fc420d421bd215aad1fd
+      WORKER_NAME: genevieve-emergency-v103-gate
+      PREVIEW_ALIAS: v103-gate
+      BASE_URL: https://v103-gate-genevieve-emergency-v103-gate.positivity864.workers.dev
+
+    steps:
+      - name: Checkout isolated verification branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct exact sealed V10.3 portal archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat verification/v10.3/binary/part*.bin > v103_portal_exact.tar.gz
+          ACTUAL="$(sha256sum v103_portal_exact.tar.gz | awk '{print $1}')"
+          echo "Expected: ${EXPECTED_ARCHIVE_SHA256}"
+          echo "Actual:   ${ACTUAL}"
+          test "${ACTUAL}" = "${EXPECTED_ARCHIVE_SHA256}"
+
+      - name: Extract and verify every V10.3 portal byte
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf portal
+          mkdir portal
+          tar -xzf v103_portal_exact.tar.gz -C portal
+          test "$(find portal -type f | wc -l | tr -d ' ')" = "15"
+          cd portal
+          sha256sum -c "${GITHUB_WORKSPACE}/verification/v10.3/EXPECTED_FILES_SHA256.txt"
+
+      - name: Guard Cloudflare authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}" || {
+            echo "CLOUDFLARE_API_TOKEN is not available to this verification repository." >&2
+            exit 1
+          }
+          echo "::add-mask::${CLOUDFLARE_API_TOKEN}"
+
+      - name: Generate isolated assets-only Cloudflare configuration
+        shell: bash
+        run: |
+          cat > wrangler.verify.jsonc <<'JSON'
+          {
+            "name": "genevieve-emergency-v103-gate",
+            "compatibility_date": "2026-08-27",
+            "preview_urls": true,
+            "assets": {
+              "directory": "./portal"
+            }
+          }
+          JSON
+
+      - name: Upload isolated Cloudflare preview version only
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.34.0 versions upload \
+            --config wrangler.verify.jsonc \
+            --preview-alias "${PREVIEW_ALIAS}" \
+            --message "V10.3 exact-byte external routing gate ${GITHUB_SHA}" \
+            | tee /tmp/cloudflare-version-upload.log
+          grep -Eqi 'workers\.dev|preview' /tmp/cloudflare-version-upload.log
+
+      - name: Wait for exact preview URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 18); do
+            code="$(curl --silent --show-error --header 'Accept-Encoding: identity' --output /tmp/master.html --write-out '%{http_code}' "${BASE_URL}/START_HERE.html" || true)"
+            if [ "$code" = "200" ]; then
+              echo "Preview ready on attempt ${attempt}: ${BASE_URL}"
+              exit 0
+            fi
+            echo "Preview not ready yet: HTTP ${code}"
+            sleep 5
+          done
+          echo "Cloudflare preview did not become reachable." >&2
+          exit 1
+
+      - name: Verify deployed bytes match V10.3 exactly
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf deployed
+          mkdir deployed
+          while read -r expected rel; do
+            rel="${rel#./}"
+            mkdir -p "deployed/$(dirname "$rel")"
+            curl --fail --silent --show-error \
+              --header 'Accept-Encoding: identity' \
+              "${BASE_URL}/${rel}" \
+              --output "deployed/${rel}"
+            actual="$(sha256sum "deployed/${rel}" | awk '{print $1}')"
+            if [ "$actual" != "$expected" ]; then
+              echo "HASH FAIL ${rel}: expected ${expected}, got ${actual}" >&2
+              exit 1
+            fi
+            echo "HASH PASS ${rel}"
+          done < verification/v10.3/EXPECTED_FILES_SHA256.txt
+
+      - name: Physically exercise all real routes in Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v103-browser
+          cd /tmp/v103-browser
+          npm init -y >/dev/null 2>&1
+          npm install --no-save playwright-core@1.55.0 >/dev/null 2>&1
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME" || { echo "No Chromium-family browser is installed on runner" >&2; exit 1; }
+          export CHROME
+          export NODE_PATH=/tmp/v103-browser/node_modules
+          mkdir -p "${GITHUB_WORKSPACE}/browser-evidence"
+          node <<'NODE'
+          const { chromium } = require('playwright-core');
+          const fs = require('fs');
+          const base = process.env.BASE_URL;
+          const executablePath = process.env.CHROME;
+          const services = [
+            ['police','/dashboards/police.html'],
+            ['ambulance','/dashboards/ambulance.html'],
+            ['ses','/dashboards/ses.html'],
+            ['fire','/dashboards/fire.html'],
+            ['marine','/dashboards/surf-marine.html'],
+            ['eoc','/dashboards/eoc.html'],
+            ['army','/dashboards/army.html'],
+            ['navy','/dashboards/navy.html'],
+            ['air','/dashboards/air-force.html']
+          ];
+          const cleanPath = u => new URL(u).pathname;
+          (async () => {
+            const browser = await chromium.launch({headless:true, executablePath, args:['--no-sandbox']});
+            const page = await browser.newPage();
+            const results = [];
+            for (const [id,path] of services) {
+              await page.goto(base + '/START_HERE.html', {waitUntil:'networkidle'});
+              const link = page.locator(`[data-service="${id}"]`);
+              if (await link.count() !== 1) throw new Error(`${id}: master control missing`);
+              await Promise.all([page.waitForURL(`**${path}`), link.click()]);
+              if (cleanPath(page.url()) !== path) throw new Error(`${id}: wrong click target ${page.url()}`);
+
+              await page.reload({waitUntil:'networkidle'});
+              if (cleanPath(page.url()) !== path) throw new Error(`${id}: refresh changed route`);
+
+              await page.goBack({waitUntil:'networkidle'});
+              if (cleanPath(page.url()) !== '/START_HERE.html') throw new Error(`${id}: browser Back did not return to master`);
+
+              await page.goto(base + path, {waitUntil:'networkidle'});
+              if (cleanPath(page.url()) !== path) throw new Error(`${id}: direct URL failed`);
+              const home = page.locator('#genevieve-master-return');
+              if (await home.count() !== 1) throw new Error(`${id}: Back/Home control missing`);
+              await Promise.all([page.waitForURL('**/START_HERE.html'), home.click()]);
+              if (cleanPath(page.url()) !== '/START_HERE.html') throw new Error(`${id}: Home control did not return to master`);
+              results.push({service:id,path,masterClick:true,refresh:true,browserBack:true,directUrl:true,home:true});
+            }
+            await page.goto(base + '/START_HERE.html', {waitUntil:'networkidle'});
+            await page.screenshot({path:process.env.GITHUB_WORKSPACE + '/browser-evidence/master.png', fullPage:true});
+            fs.writeFileSync(process.env.GITHUB_WORKSPACE + '/browser-evidence/navigation.json', JSON.stringify(results,null,2));
+            await browser.close();
+            console.log(`Physical Chromium route gate: ${results.length}/9 PASS`);
+          })().catch(err => { console.error(err); process.exit(1); });
+          NODE
+
+      - name: Upload browser navigation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v103-cloudflare-navigation-evidence
+          path: browser-evidence/
+          if-no-files-found: ignore
