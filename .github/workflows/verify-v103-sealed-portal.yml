@@ -3,23 +3,39 @@ name: Verify sealed V10.3 portal
 on:
   push:
     branches:
-      - cloudflare-v10-3-verification-authoritative
+      - v10.3-deployment-infrastructure
+    paths:
+      - 'verification/v10.3/chunks/**'
+      - 'verification/v10.3/manifest.sha256'
+      - '.github/workflows/verify-v103-sealed-portal.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: v103-static-verification-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - name: Checkout exact branch commit
+      - name: Checkout exact verification commit
         uses: actions/checkout@v4
+
+      - name: Require isolated V10.3 branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF_NAME}" = "v10.3-deployment-infrastructure"
 
       - name: Reconstruct sealed archive in deterministic filename order
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf verification/v10.3/reconstructed
           mkdir -p verification/v10.3/reconstructed
           cat verification/v10.3/chunks/* > verification/v10.3/reconstructed/v10.3-portal.tar.gz
           test "$(wc -c < verification/v10.3/reconstructed/v10.3-portal.tar.gz)" -eq 32877
@@ -44,6 +60,15 @@ jobs:
           test -f verification/v10.3/reconstructed/site/START_HERE.html
           test -d verification/v10.3/reconstructed/site/dashboards
           test "$(find verification/v10.3/reconstructed/site/dashboards -maxdepth 1 -name '*.html' -type f | wc -l)" -eq 9
+
+      - name: Prove this workflow cannot deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -Eiq 'wrangler[[:space:]]+(deploy|versions[[:space:]]+upload)|npm[[:space:]]+run[[:space:]]+(deploy|deploy:preview)' .github/workflows/verify-v103-sealed-portal.yml; then
+            echo 'Deployment command found in static verification workflow' >&2
+            exit 1
+          fi
 
       - name: Record verification evidence
         shell: bash
