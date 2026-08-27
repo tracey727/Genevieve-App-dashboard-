@@ -1,5 +1,6 @@
 name: V10.3 Infrastructure Audit
 
+# Deployment creation is intentionally excluded from every push trigger.
 on:
   push:
     branches:
