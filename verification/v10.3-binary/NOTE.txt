@@ -1,0 +1,1 @@
+Binary chunks are created with Git data API and verified against local Git blob SHAs before being attached to this branch.
