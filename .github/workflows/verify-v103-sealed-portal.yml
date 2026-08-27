@@ -1,0 +1,66 @@
+name: Verify sealed V10.3 portal
+
+on:
+  push:
+    branches:
+      - cloudflare-v10-3-verification-authoritative
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch commit
+        uses: actions/checkout@v4
+
+      - name: Reconstruct sealed archive in deterministic filename order
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p verification/v10.3/reconstructed
+          cat verification/v10.3/chunks/* > verification/v10.3/reconstructed/v10.3-portal.tar.gz
+          test "$(wc -c < verification/v10.3/reconstructed/v10.3-portal.tar.gz)" -eq 32877
+
+      - name: Require exact V10.3 SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(sha256sum verification/v10.3/reconstructed/v10.3-portal.tar.gz | awk '{print $1}')"
+          expected="79ddcfc202355783a3f45fd0e4871a8c2aeeeca287d4fc420d421bd215aad1fd"
+          echo "expected=$expected"
+          echo "actual=$actual"
+          test "$actual" = "$expected"
+
+      - name: Validate archive and extract unchanged portal
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -tzf verification/v10.3/reconstructed/v10.3-portal.tar.gz > verification/v10.3/reconstructed/archive-files.txt
+          mkdir -p verification/v10.3/reconstructed/site
+          tar -xzf verification/v10.3/reconstructed/v10.3-portal.tar.gz -C verification/v10.3/reconstructed/site
+          test -f verification/v10.3/reconstructed/site/START_HERE.html
+          test -d verification/v10.3/reconstructed/site/dashboards
+          test "$(find verification/v10.3/reconstructed/site/dashboards -maxdepth 1 -name '*.html' -type f | wc -l)" -eq 9
+
+      - name: Record verification evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "commit=${GITHUB_SHA}"
+            echo "archive_sha256=$(sha256sum verification/v10.3/reconstructed/v10.3-portal.tar.gz | awk '{print $1}')"
+            echo "archive_bytes=$(wc -c < verification/v10.3/reconstructed/v10.3-portal.tar.gz)"
+            echo "dashboard_count=$(find verification/v10.3/reconstructed/site/dashboards -maxdepth 1 -name '*.html' -type f | wc -l)"
+          } | tee verification/v10.3/reconstructed/VERIFICATION_EVIDENCE.txt
+
+      - name: Upload verified evidence only
+        uses: actions/upload-artifact@v4
+        with:
+          name: v103-sealed-portal-verification
+          path: |
+            verification/v10.3/reconstructed/VERIFICATION_EVIDENCE.txt
+            verification/v10.3/reconstructed/archive-files.txt
+          if-no-files-found: error
