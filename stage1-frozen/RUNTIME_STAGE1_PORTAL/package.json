@@ -1,0 +1,15 @@
+{
+  "name": "genevieve-emergency-stage1-portal-runtime",
+  "version": "10.3.0",
+  "private": true,
+  "type": "module",
+  "engines": {"node": ">=20"},
+  "scripts": {
+    "start": "node server.js",
+    "test:integration": "node --test ../STAGE1_INTEGRATION_TESTS/*.test.mjs"
+  },
+  "dependencies": {
+    "express": "5.1.0",
+    "pg": "8.16.3"
+  }
+}

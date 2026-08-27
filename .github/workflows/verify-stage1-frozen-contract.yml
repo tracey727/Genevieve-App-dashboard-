@@ -1,0 +1,167 @@
+name: Verify frozen Stage-1 API contract
+
+on:
+  push:
+    branches:
+      - v10.3-deployment-infrastructure
+    paths:
+      - 'stage1-frozen/**'
+      - '.github/workflows/verify-stage1-frozen-contract.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stage1-frozen-contract-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  freeze-and-verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact freeze commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require isolated branch and no dashboard redesign
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF_NAME}" = "v10.3-deployment-infrastructure"
+          changed="$(git diff-tree --no-commit-id --name-only -r HEAD)"
+          if echo "$changed" | grep -E '^(index\.html|app\.js|config\.js|styles\.css|dashboards/|shared/|verification/v10\.3/)'; then
+            echo 'Working dashboard or sealed V10.3 content changed during Stage-1 freeze' >&2
+            exit 1
+          fi
+
+      - name: Verify exact recovered historical bytes
+        shell: bash
+        working-directory: stage1-frozen
+        run: |
+          set -euo pipefail
+          cat > /tmp/stage1-exact.sha256 <<'EOF'
+          99f363e53a923a748bf20b90d0039f6de09502e9dc914fbbdd8207e4d68eded2  STAGE1_SHARED_CORE/source/package.json
+          a0ae53535e06484c433e2a7599408bad586e43222f5f37f73e3b7b927800d8bf  STAGE1_SHARED_CORE/source/.env.example
+          33081e9119f048c7d911fe24aa2f2e3b846fec515f018a6f861704f5cc3abfa2  STAGE1_SHARED_CORE/source/README.md
+          ea48e8c17dbe5d7ef0b95710c93d24cdfd6bddaba2039047f187db5ad37849a9  STAGE1_SHARED_CORE/source/docs/NEON_RUNTIME_GATE_2026-08-27.md
+          6fafeeef10b4a1e738ad737845563b6e03874834e87e4954edf487f21dbca422  STAGE1_SHARED_CORE/source/docs/SECURITY_MODEL.md
+          b595926ba825dc2e58bb016777a522dc5e0a638435d6706e5c4b740166f96f99  STAGE1_SHARED_CORE/source/scripts/audit.mjs
+          b6cbc2dc3e6cc45ad94a05aa14b1e4b66b4317d9c7c4d5d7210c0d0956f28a03  STAGE1_SHARED_CORE/source/scripts/create-user.mjs
+          0602e2c72793b5a2b968fda047e91c63f3aeb6a31519a875e1e3240f7ff44423  STAGE1_SHARED_CORE/source/src/core/authz.js
+          9eb2a19c5215600fb5b3917687159c211a631fcbd992e5813b3d632e67dfbc17  STAGE1_SHARED_CORE/source/src/core/handover.js
+          1aea06bdff267d926a3f3e18b18592e08575c0a81a7f532f197e09c0f6fd885f  STAGE1_SHARED_CORE/source/src/core/security.js
+          3748614b850de5adf0510702715c33046fcf3bfc335a99c7566de1763fadb3e0  STAGE1_SHARED_CORE/source/src/core/states.js
+          30c5dae568f10adbfb9d4f9eececab244af61ab03504b04ba3e6572436445cc3  STAGE1_SHARED_CORE/source/src/db/repository.js
+          e15aeb5d78739c39d1bd8d76fd33de3dc86fded4a45e446a2e7daf9cad15efa7  STAGE1_SHARED_CORE/source/src/db/schema.sql
+          47018afae4e18c0796a18377909ac491d82affe7f8ad537a11272378dd6da00d  STAGE1_SHARED_CORE/source/src/db/seed-demo.sql
+          eefa390f34098c8a85efca541b8db9e0f6e031bed185d59485df8b52aa5dbfdb  STAGE1_SHARED_CORE/source/src/http/app.js
+          fd44b01e4a88eda6f6f262676233b411dec7613aaf88e812e43f024456c8e7ac  STAGE1_SHARED_CORE/source/src/server.js
+          29d5a11b06aeb24af764b4c956cfdbabfd4e01e23fba13eab360637e6771a3fe  STAGE1_SHARED_CORE/source/test/core.test.js
+          afa4d349d51bc0f9f330ce0b76b756b63eb6900fff735dda4fe88e180f59c55d  RUNTIME_STAGE1_PORTAL/README.md
+          a4be44fcb1409ba98c35ee5492c8569bb060ea79e5bc55fc953b4ff205fb747c  RUNTIME_STAGE1_PORTAL/package.json
+          ff5bdb090d704675927b80bff8e93bb81823e2b6116acc00fb336226756d5b93  RUNTIME_STAGE1_PORTAL/server.js
+          59e0ddea5ac613c150757d3537c864e7b112bcbf865a7565da8f5512318aa6ae  STAGE1_INTEGRATION_TESTS/adapter-contract.test.mjs
+          054a53385c046ab1562ac690c687bc9ba2aecf559453b0297ecd156896bd0f35  STAGE1_INTEGRATION_TESTS/core-contract.test.mjs
+          a9069dc31d59bfda3cb4112adadb2c692a093df3a7078cbc3eeb13f81e28e73f  STAGE1_INTEGRATION_TESTS/package-integrity.test.mjs
+          f0d7043b24146fdf029cd487fdc056a3fed2bd7b0d652a5cd3d51cd3fcf6a2ff  STAGE1_SHARED_CORE/ORIGINAL_STAGE1_CORE_SHA256.txt
+          be14a308c6404dfdec46a3e014f7bdb22163a72f25e3962a558da7b07d14e136  WORKING_DASHBOARD/shared/stage1-core-adapter.js
+          EOF
+          sha256sum -c /tmp/stage1-exact.sha256
+
+      - name: Require exact dependency pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs=require('fs');
+          for (const p of ['stage1-frozen/STAGE1_SHARED_CORE/source/package.json','stage1-frozen/RUNTIME_STAGE1_PORTAL/package.json']) {
+            const j=JSON.parse(fs.readFileSync(p));
+            if (j.dependencies.express !== '5.1.0' || j.dependencies.pg !== '8.16.3') process.exit(1);
+          }
+          NODE
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Create reproducible lockfiles if absent
+        id: locks
+        shell: bash
+        run: |
+          set -euo pipefail
+          created=false
+          for d in stage1-frozen/STAGE1_SHARED_CORE/source stage1-frozen/RUNTIME_STAGE1_PORTAL; do
+            if [ ! -f "$d/package-lock.json" ]; then
+              (cd "$d" && npm install --package-lock-only --ignore-scripts --no-audit --no-fund)
+              created=true
+            fi
+          done
+          echo "created=$created" >> "$GITHUB_OUTPUT"
+
+      - name: Verify lockfiles resolve exact direct dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs=require('fs');
+          for (const p of ['stage1-frozen/STAGE1_SHARED_CORE/source/package-lock.json','stage1-frozen/RUNTIME_STAGE1_PORTAL/package-lock.json']) {
+            const j=JSON.parse(fs.readFileSync(p));
+            if (j.packages['node_modules/express'].version !== '5.1.0') process.exit(1);
+            if (j.packages['node_modules/pg'].version !== '8.16.3') process.exit(1);
+          }
+          NODE
+
+      - name: Commit generated lockfiles only
+        if: steps.locks.outputs.created == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add stage1-frozen/STAGE1_SHARED_CORE/source/package-lock.json stage1-frozen/RUNTIME_STAGE1_PORTAL/package-lock.json
+          test "$(git diff --cached --name-only | wc -l)" -eq 2
+          git commit -m 'Lock frozen Stage-1 runtime dependencies'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Reinstall core exactly and run original Stage-1 tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd stage1-frozen/STAGE1_SHARED_CORE/source
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm test
+          npm run audit
+
+      - name: Reinstall wrapper exactly
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd stage1-frozen/RUNTIME_STAGE1_PORTAL
+          npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run exact dependency-free integration contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test stage1-frozen/STAGE1_INTEGRATION_TESTS/core-contract.test.mjs stage1-frozen/STAGE1_INTEGRATION_TESTS/adapter-contract.test.mjs
+
+      - name: Confirm package-integrity test preserved byte-for-byte
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'a9069dc31d59bfda3cb4112adadb2c692a093df3a7078cbc3eeb13f81e28e73f  stage1-frozen/STAGE1_INTEGRATION_TESTS/package-integrity.test.mjs' | sha256sum -c -
+          echo 'Full package-integrity test is preserved but intentionally not executed here because the sealed binary ZIP and nine working dashboards remain in their authoritative V10.3 archive rather than being duplicated into stage1-frozen.'
+
+      - name: Prove freeze workflow cannot deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -Eiq 'wrangler[[:space:]]+(deploy|versions[[:space:]]+upload)|npm[[:space:]]+run[[:space:]]+(deploy|deploy:preview)' .github/workflows/verify-stage1-frozen-contract.yml; then
+            echo 'Deployment command found in Stage-1 freeze workflow' >&2
+            exit 1
+          fi
+          echo 'Stage-1 API contract freeze gate: GREEN'

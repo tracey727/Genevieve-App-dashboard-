@@ -1,0 +1,38 @@
+import express from "express";
+import crypto from "node:crypto";
+import { verifyPassword, newSessionToken } from "../core/security.js";
+import { requirePermission } from "../core/authz.js";
+import { assertState, assertTransition } from "../core/states.js";
+
+function parseCookies(header='') { return Object.fromEntries(header.split(';').map(v=>v.trim()).filter(Boolean).map(v=>{const i=v.indexOf('=');return [decodeURIComponent(v.slice(0,i)),decodeURIComponent(v.slice(i+1))]})); }
+
+export function createApp(repo) {
+  const app=express();
+  app.disable('x-powered-by');
+  app.use(express.json({limit:'256kb'}));
+  app.use((req,res,next)=>{req.requestId=crypto.randomUUID();res.setHeader('X-Request-Id',req.requestId);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('Cache-Control','no-store');next();});
+
+  const audit = async (req, action, resourceType, resourceId, outcome, details={}) => {
+    try { await repo.audit({agencyId:req.user?.agencyId,actorUserId:req.user?.id,actorRole:req.user?.role,action,resourceType,resourceId,outcome,requestId:req.requestId,details}); } catch {}
+  };
+
+  const auth=async(req,res,next)=>{const token=parseCookies(req.headers.cookie||'').genevieve_session;if(!token)return res.status(401).json({error:'Authentication required'});const user=await repo.resolveSession(token);if(!user)return res.status(401).json({error:'Session expired or revoked'});req.user=user;next();};
+  const permitted=(action, resourceLoader=null)=>async(req,res,next)=>{try{const resource=resourceLoader?await resourceLoader(req):{agencyId:req.user.agencyId};if(resourceLoader&&!resource)return res.status(404).json({error:'Not found'});requirePermission(req.user,action,{agencyId:resource.agency_id||resource.agencyId});req.resource=resource;next();}catch(e){await audit(req,action,'authorization',req.params.id,'DENY',{reason:e.message});res.status(403).json({error:'Access denied'});}};
+
+  app.get('/health',(req,res)=>res.json({ok:true,service:'GENEVIEVE Shared Emergency Operations Core',version:'1.0.2'}));
+
+  app.post('/auth/login',async(req,res)=>{const {email,password}=req.body||{};const user=await repo.getUserByEmail(email||'');if(user?.locked_until && new Date(user.locked_until)>new Date()){await audit(req,'auth:login','session',null,'DENY',{email,reason:'locked'});return res.status(429).json({error:'Account temporarily locked'});}if(!user||!verifyPassword(password||'',user.password_hash)){if(user) await repo.recordLoginFailure(user.id);await audit(req,'auth:login','session',null,'DENY',{email});return res.status(401).json({error:'Invalid credentials'});}await repo.clearLoginFailures(user.id);const token=newSessionToken();await repo.createSession(user.id,token);res.setHeader('Set-Cookie',`genevieve_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${process.env.NODE_ENV==='production'?'; Secure':''}`);await audit({...req,user:{id:user.id,agencyId:user.agency_id,role:user.role}},'auth:login','session',null,'ALLOW');res.json({user:{id:user.id,email:user.email,displayName:user.display_name,role:user.role,agencyId:user.agency_id}});});
+  app.post('/auth/logout',auth,async(req,res)=>{await repo.revokeSession(req.user.sessionId);await audit(req,'auth:logout','session',req.user.sessionId,'ALLOW');res.setHeader('Set-Cookie','genevieve_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');res.status(204).end();});
+
+  app.get('/events',auth,permitted('event:read'),async(req,res)=>res.json({events:await repo.listEvents(req.user.agencyId)}));
+  app.post('/events',auth,permitted('event:create'),async(req,res)=>{try{assertState(req.body.state||'GREEN');if(!await repo.usersBelongToAgency([req.body.ownerUserId,req.body.backupUserId],req.user.agencyId)){await audit(req,'event:create','event',null,'DENY',{reason:'cross-agency target'});return res.status(403).json({error:'Access denied'});}const e=await repo.createEvent({agencyId:req.user.agencyId,title:req.body.title,summary:req.body.summary,state:req.body.state||'GREEN',ownerUserId:req.body.ownerUserId,backupUserId:req.body.backupUserId,createdBy:req.user.id});await audit(req,'event:create','event',e.id,'ALLOW',{state:e.state});res.status(201).json(e);}catch(e){await audit(req,'event:create','event',null,'ERROR',{reason:e.message});res.status(400).json({error:e.message});}});
+  app.post('/events/:id/acknowledge',auth,permitted('event:ack',req=>repo.getEvent(req.params.id)),async(req,res)=>{const e=await repo.acknowledge(req.params.id,req.user.id);await audit(req,'event:ack','event',e.id,'ALLOW');res.json(e);});
+  app.post('/events/:id/assign',auth,permitted('event:assign',req=>repo.getEvent(req.params.id)),async(req,res)=>{if(!await repo.usersBelongToAgency([req.body.ownerUserId,req.body.backupUserId],req.user.agencyId)){await audit(req,'event:assign','event',req.params.id,'DENY',{reason:'cross-agency target'});return res.status(403).json({error:'Access denied'});}const e=await repo.assign(req.params.id,req.body.ownerUserId||null,req.body.backupUserId||null);await audit(req,'event:assign','event',e.id,'ALLOW',{ownerUserId:e.owner_user_id,backupUserId:e.backup_user_id});res.json(e);});
+  app.post('/events/:id/state',auth,permitted('event:state',req=>repo.getEvent(req.params.id)),async(req,res)=>{try{assertTransition(req.resource.state,req.body.state,{governanceOverride:req.user.role==='ADMIN'});const e=await repo.setState(req.params.id,req.body.state);await audit(req,'event:state','event',e.id,'ALLOW',{from:req.resource.state,to:e.state});res.json(e);}catch(e){await audit(req,'event:state','event',req.params.id,'DENY',{reason:e.message});res.status(400).json({error:e.message});}});
+  app.post('/events/:id/handovers',auth,permitted('handover:request',req=>repo.getEvent(req.params.id)),async(req,res)=>{if(req.resource.owner_user_id!==req.user.id&&!["DISPATCHER","SUPERVISOR","ADMIN"].includes(req.user.role)){await audit(req,'handover:request','event',req.params.id,'DENY',{reason:'not owner'});return res.status(403).json({error:'Only the owner or command role may initiate handover'});}if(!await repo.usersBelongToAgency([req.body.toUserId,req.resource.owner_user_id||req.user.id],req.user.agencyId)){await audit(req,'handover:request','event',req.params.id,'DENY',{reason:'cross-agency target'});return res.status(403).json({error:'Access denied'});}const h=await repo.createHandover({agencyId:req.user.agencyId,eventId:req.params.id,fromUserId:req.resource.owner_user_id||req.user.id,toUserId:req.body.toUserId,note:req.body.note});await audit(req,'handover:request','handover',h.id,'ALLOW',{eventId:req.params.id,toUserId:req.body.toUserId});res.status(201).json(h);});
+  app.post('/handovers/:id/accept',auth,permitted('handover:accept'),async(req,res)=>{const h=await repo.getHandover(req.params.id);if(!h)return res.status(404).json({error:'Not found'});const event=await repo.getEvent(h.event_id);if(!event||event.agency_id!==req.user.agencyId||h.to_user_id!==req.user.id){await audit(req,'handover:accept','handover',req.params.id,'DENY');return res.status(403).json({error:'Access denied'});}const out=await repo.acceptHandover(h.id,event.id,req.user.id);await audit(req,'handover:accept','handover',h.id,'ALLOW',{eventId:event.id});res.json(out);});
+  app.get('/audit',auth,permitted('audit:read'),async(req,res)=>res.json({entries:await repo.listAudit(req.user.agencyId)}));
+
+  app.use((err,req,res,next)=>{console.error(err);audit(req,'http:error','request',req.requestId,'ERROR',{message:err.message});res.status(500).json({error:'Internal error',requestId:req.requestId});});
+  return app;
+}

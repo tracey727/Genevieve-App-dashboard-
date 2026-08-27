@@ -1,0 +1,19 @@
+{
+  "name": "genevieve-shared-emergency-operations-core",
+  "version": "1.0.2",
+  "private": true,
+  "description": "Controlled operational prototype core for GENEVIEVE emergency-service agency modules.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "audit": "node scripts/audit.mjs"
+  },
+  "dependencies": {
+    "express": "5.1.0",
+    "pg": "8.16.3"
+  }
+}
