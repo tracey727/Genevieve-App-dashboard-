@@ -1,0 +1,1 @@
+Binary-transfer verification branch. The sealed V10.3 portal archive is attached through Git data only after SHA-256 verification. Production/main is not modified.
