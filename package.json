@@ -1,0 +1,19 @@
+{
+  "name": "genevieve-emergency-v10-3-deployment",
+  "version": "10.3.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "prepare:v10.3": "node scripts/prepare-v103.mjs",
+    "verify:v10.3": "node scripts/verify-v103.mjs",
+    "test": "npm run prepare:v10.3 && npm run verify:v10.3 && wrangler deploy --dry-run",
+    "deploy:preview": "npm run prepare:v10.3 && npm run verify:v10.3 && wrangler versions upload --preview-alias v103-infra",
+    "deploy": "npm run prepare:v10.3 && npm run verify:v10.3 && wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.125.0"
+  }
+}
