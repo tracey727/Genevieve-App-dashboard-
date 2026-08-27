@@ -1,0 +1,1 @@
+Each binary chunk will be added using GitHub Git data blob objects, not text contents API. The archive is reconstructed only after all expected Git blob SHAs match.
