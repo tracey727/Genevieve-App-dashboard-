@@ -1,0 +1,96 @@
+name: V10.3 Deployment Infrastructure Gate
+
+on:
+  push:
+    branches:
+      - v10.3-deployment-infrastructure
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: v103-deployment-infrastructure
+  cancel-in-progress: false
+
+jobs:
+  lock-test-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      SOURCE_SHA: 2b6a604bc92bef14dd8fcb5b8e90dbac883676e0
+
+    steps:
+      - name: Checkout infrastructure branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require exact verified V10.3 ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+
+      - name: Reject any application or sealed-source modifications
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only "$SOURCE_SHA"...HEAD | tee /tmp/v103-infra-files.txt
+          unexpected="$(grep -Ev '^(\.gitignore|package\.json|package-lock\.json|wrangler\.jsonc|src/worker\.js|scripts/prepare-v103\.mjs|scripts/verify-v103\.mjs|\.github/workflows/v103-deployment-infrastructure\.yml)$' /tmp/v103-infra-files.txt || true)"
+          if [ -n "$unexpected" ]; then
+            echo 'Unexpected non-infrastructure changes detected:' >&2
+            echo "$unexpected" >&2
+            exit 1
+          fi
+          git diff --quiet "$SOURCE_SHA" HEAD -- verification/v10.3 README-FIRST.txt app.js config.js index.html manifest.webmanifest service-worker.js styles.css vercel.json
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+        continue-on-error: true
+
+      - name: Generate dependency lockfile when absent
+        id: lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f package-lock.json ]; then
+            npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+            echo 'created=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'created=false' >> "$GITHUB_OUTPUT"
+          fi
+          test -f package-lock.json
+          node -e "const l=require('./package-lock.json'); if(l.packages['node_modules/wrangler'].version!=='4.125.0') process.exit(1); console.log('Locked wrangler',l.packages['node_modules/wrangler'].version)"
+
+      - name: Commit generated lockfile to infrastructure branch
+        if: steps.lock.outputs.created == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package-lock.json
+          git commit -m 'Lock V10.3 deployment dependencies'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: Install exactly from lockfile
+        shell: bash
+        run: npm ci --no-audit --no-fund
+
+      - name: Run V10.3 deployment integrity and Wrangler dry-run tests
+        shell: bash
+        run: npm test
+
+      - name: Re-audit changed paths after tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          unexpected="$(git diff --name-only "$SOURCE_SHA"...HEAD | grep -Ev '^(\.gitignore|package\.json|package-lock\.json|wrangler\.jsonc|src/worker\.js|scripts/prepare-v103\.mjs|scripts/verify-v103\.mjs|\.github/workflows/v103-deployment-infrastructure\.yml)$' || true)"
+          test -z "$unexpected"
+          test "$(git status --porcelain --untracked-files=no | wc -l)" -eq 0
+          echo 'V10.3 deployment infrastructure gate: GREEN'
