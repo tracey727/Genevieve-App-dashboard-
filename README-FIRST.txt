@@ -1,5 +1,5 @@
 GENEVIEVE MOBILE TEST DASHBOARD
-GitHub + Vercel ready
+GitHub + Cloudflare ready
 
 WHAT THIS PACKAGE DOES
 - Gives you one simple phone screen.
@@ -21,17 +21,15 @@ GITHUB
 3. Do not upload the outer ZIP file into the repository.
 4. Commit the files to the main branch.
 
-VERCEL
-1. In Vercel, choose Add New > Project.
-2. Import the new GitHub repository.
-3. Framework Preset: Other.
-4. Root Directory: leave as the repository root.
-5. Build Command: leave empty.
-6. Output Directory: leave empty.
-7. Click Deploy.
+CLOUDFLARE PAGES
+1. Connect this GitHub repository to Cloudflare Pages.
+2. Framework preset: none / static HTML.
+3. Build command: leave empty.
+4. Output directory: repository root.
+5. Deploy.
 
 PHONE
-1. Open the Vercel address on the phone.
+1. Open the Cloudflare Pages address on the phone.
 2. In Safari, tap Share > Add to Home Screen.
 3. Open the new Home Screen shortcut.
 4. Tap a service card to change ONLINE/OFFLINE.
@@ -44,4 +42,4 @@ to:
 
 Then place a public HTTPS health URL into healthUrl for each service.
 The endpoints must be reachable from the internet and allow browser requests (CORS).
-Do not use localhost or 127.0.0.1 in a Vercel deployment.
+Do not use localhost or 127.0.0.1 in a public deployment.
